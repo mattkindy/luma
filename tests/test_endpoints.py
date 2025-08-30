@@ -55,9 +55,13 @@ class TestConversationEndpoint:
 
     def test_conversation_with_session_id(self):
         """Test that conversation endpoint uses provided session ID."""
-        test_session_id = "test-session-123"
+        response = client.post("/conversation", json={"message": "Hello"})
+        data = response.json()
+        test_session_id = data["session_id"]
         response = client.post("/conversation", json={"message": "Hello", "session_id": test_session_id})
         data = response.json()
+
+        print(f"Conversation response: {data}")
 
         assert data["session_id"] == test_session_id
 
@@ -66,28 +70,10 @@ class TestConversationEndpoint:
         response = client.post("/conversation", json={"message": "Hello"})
         data = response.json()
 
-        assert data["session_id"].startswith("session_")
-        assert len(data["session_id"]) == 16  # "session_" + 8 hex chars
-
-    def test_conversation_canned_responses(self):
-        """Test that conversation endpoint returns appropriate canned responses."""
-        # Test hello response
-        response = client.post("/conversation", json={"message": "Hello"})
-        data = response.json()
-        assert "healthcare assistant" in data["response"].lower()
-        assert "verify your identity" in data["response"].lower()
-
-        # Test help response
-        response = client.post("/conversation", json={"message": "I need help"})
-        data = response.json()
-        assert "appointments" in data["response"].lower()
-        assert "verify your identity" in data["response"].lower()
-
-        # Test appointment response
-        response = client.post("/conversation", json={"message": "I need help with my appointment"})
-        data = response.json()
-        assert "appointments" in data["response"].lower()
-        assert "verify your identity" in data["response"].lower()
+        # Session ID should be a CUID (24 characters, starts with lowercase letter)
+        assert len(data["session_id"]) == 24
+        assert data["session_id"][0].islower()
+        assert data["session_id"].isalnum()
 
     def test_conversation_missing_message(self):
         """Test that conversation endpoint requires message field."""

@@ -1,12 +1,27 @@
 """API endpoints for the healthcare AI service."""
 
-import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from app import __version__
 from app.models.conversation import ConversationRequest, ConversationResponse, HealthResponse
+from app.services.appointments import InMemoryAppointmentService
+from app.services.conversation import ConversationService
+from app.services.llm import get_llm_service
+from app.services.session_manager import InMemorySessionManager
+from app.services.verification import HardcodedVerificationService
+from app.tools import get_tools_registry
+from app.utils.logging import get_logger
+
+logger = get_logger(__name__)
+
+session_manager = InMemorySessionManager()
+verification_service = HardcodedVerificationService()
+appointment_service = InMemoryAppointmentService()
+tools_registry = get_tools_registry(verification_service, appointment_service)
+llm_service = get_llm_service()
+conversation_service = ConversationService(llm_service, tools_registry)
 
 router = APIRouter()
 
@@ -18,47 +33,43 @@ async def handle_conversation(request: ConversationRequest) -> ConversationRespo
     This is a basic implementation with canned responses for initial setup.
     Will be replaced with actual Claude integration in Phase 1.
     """
-    # Generate session ID if not provided
-    session_id = request.session_id or f"session_{uuid.uuid4().hex[:8]}"
+    # Get or create session using session manager
+    try:
+        if request.session_id:
+            logger.info(f"Validating existing session: {request.session_id}")
+            session = session_manager.get_session(request.session_id)
+            if not session:
+                logger.warning(f"Invalid session ID provided: {request.session_id}")
+                raise HTTPException(status_code=400, detail=f"Invalid session ID: {request.session_id}")
+        else:
+            logger.info("Creating new session")
+            session = session_manager.get_or_create_session()
 
-    # Canned responses for testing
-    canned_responses: dict[str, str] = {
-        "hello": (
-            "Hello! I'm your healthcare assistant. To help you with your appointments, "
-            "I'll need to verify your identity first. Please provide your full name, "
-            "phone number, and date of birth."
-        ),
-        "help": (
-            "I can help you with managing your appointments, but first I need to verify "
-            "your identity. Please provide your full name, phone number, and date of birth."
-        ),
-        "appointments": (
-            "I'd be happy to help you with your appointments! However, I need to verify "
-            "your identity first for security purposes. Please provide your full name, "
-            "phone number, and date of birth."
-        ),
-    }
+        session_id = session.session_id
+        logger.info(f"Using session: {session_id}, verified: {session.verified}")
 
-    # Simple keyword matching for canned responses
-    message_lower = request.message.lower()
+    except Exception as e:
+        logger.error(f"Session management error: {e}", exc_info=True)
+        if isinstance(e, HTTPException):
+            raise
+        raise HTTPException(status_code=500, detail="Failed to manage session") from e
 
-    if "hello" in message_lower or "hi" in message_lower:
-        response_text = canned_responses["hello"]
-    elif "help" in message_lower:
-        response_text = canned_responses["help"]
-    elif "appointment" in message_lower:
-        response_text = canned_responses["appointments"]
-    else:
-        response_text = (
-            "Hello! I'm your healthcare assistant. To help you with your appointments, "
-            "I'll need to verify your identity first. Please provide your full name, "
-            "phone number, and date of birth."
-        )
-
-    return ConversationResponse(response=response_text, session_id=session_id)
+    try:
+        logger.info(f"Processing message for session {session_id}: {request.message[:50]}...")
+        response_text = await conversation_service.process_message(request.message, session)
+        logger.info(f"Generated response for session {session_id}: {response_text[:50]}...")
+        return ConversationResponse(response=response_text, session_id=session_id)
+    except Exception as e:
+        logger.error(f"Conversation processing error for session {session_id}: {e}", exc_info=True)
+        error_msg = "I apologize, but I'm experiencing technical difficulties. Please try again."
+        return ConversationResponse(response=error_msg, session_id=session_id)
 
 
 @router.get("/health", response_model=HealthResponse, tags=["Health"])
 async def health_check() -> HealthResponse:
     """Health check endpoint."""
-    return HealthResponse(status="healthy", timestamp=datetime.now(UTC), version=__version__)
+    return HealthResponse(
+        status="healthy",
+        timestamp=datetime.now(UTC),
+        version=__version__,
+    )

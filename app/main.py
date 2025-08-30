@@ -1,12 +1,17 @@
 """Main FastAPI application."""
 
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
 from app.api.endpoints import router
+from app.utils.logging import get_logger, setup_logging
 
-# Create FastAPI application
+setup_logging()
+logger = get_logger(__name__)
+
 app = FastAPI(
     title="Luma Healthcare AI",
     description=(
@@ -31,7 +36,6 @@ app = FastAPI(
     ],
 )
 
-# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Configure appropriately for production
@@ -40,11 +44,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers
 app.include_router(router)
 
 
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True, log_level="info")
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True, log_level=os.getenv("LOG_LEVEL", "info"))

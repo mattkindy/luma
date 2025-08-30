@@ -172,21 +172,13 @@ build:
     echo "Building Docker image..."
     docker build -t {{DOCKER_IMAGE}}:latest .
 
-# Runs the service in Docker
-run_docker: build
+stop_docker:
     #!/usr/bin/env bash
-    echo "===================================="
-    echo "🚀 API READY: http://localhost:{{DEV_PORT}}"
-    echo "===================================="
-    echo ""
-    echo "Starting Healthcare AI service in Docker..."
-    echo "(uvicorn logs below can be ignored)"
-    echo "Press Ctrl+C to stop"
-    echo ""
-    docker run --rm -p {{DEV_PORT}}:8000 --name healthcare-ai-dev {{DOCKER_IMAGE}}:latest
+    echo "Stopping Docker container..."
+    docker stop healthcare-ai-dev 2>/dev/null || true
 
-# Runs the service in Docker with environment file
-run_docker_env: build
+# Runs the service in Docker
+run_docker: build stop_docker
     #!/usr/bin/env bash
     if [ ! -f ".env" ]; then
         echo "❌ .env file not found. Create one with required environment variables."
@@ -203,7 +195,7 @@ run_docker_env: build
     docker run --rm -p {{DEV_PORT}}:8000 --env-file .env --name healthcare-ai-dev {{DOCKER_IMAGE}}:latest
 
 # Opens a shell in the Docker container
-shell_docker: build
+shell_docker: build stop_docker
     #!/usr/bin/env bash
     docker run --rm -it --entrypoint /bin/bash {{DOCKER_IMAGE}}:latest
 
@@ -248,6 +240,67 @@ redoc:
     else
         echo "Please open http://localhost:{{DEV_PORT}}/redoc in your browser"
     fi
+
+# Interactive chat interface for testing
+chat: setup _check_env _ensure_docker_running
+    #!/usr/bin/env bash
+    echo "🏥 Starting Luma Healthcare AI Chat Interface"
+    echo ""
+
+    # Run the interactive chat CLI
+    uv run python scripts/chat_cli.py
+
+# Check environment setup for chat
+_check_env:
+    #!/usr/bin/env bash
+    echo "🔍 Checking environment setup..."
+
+    # Check if .env file exists
+    if [ ! -f ".env" ]; then
+        echo "❌ .env file not found"
+        echo "Please create .env file with your Anthropic API key:"
+        echo "echo 'ANTHROPIC_API_KEY=your_api_key_here' > .env"
+        exit 1
+    fi
+
+    # Check if ANTHROPIC_API_KEY is set
+    if ! grep -q "ANTHROPIC_API_KEY=" .env; then
+        echo "❌ ANTHROPIC_API_KEY not found in .env file"
+        echo "Please add your Anthropic API key to .env:"
+        echo "echo 'ANTHROPIC_API_KEY=your_api_key_here' >> .env"
+        exit 1
+    fi
+
+    # Check if API key looks valid (starts with sk-)
+    api_key=$(grep "ANTHROPIC_API_KEY=" .env | cut -d'=' -f2)
+    if [[ ! "$api_key" =~ ^sk- ]]; then
+        echo "⚠️  Warning: API key doesn't look like a valid Anthropic key (should start with 'sk-')"
+        echo "Please verify your API key in .env file"
+    fi
+
+    echo "✅ Environment configuration looks good"
+
+# Ensure Docker service is running
+_ensure_docker_running:
+    #!/usr/bin/env bash
+    echo "🐳 Starting healthcare AI service..."
+
+    just run_docker > /dev/null 2>&1 &
+
+    # Wait for service to be ready
+    echo "⏳ Waiting for service to start..."
+    for i in {1..30}; do
+        if curl -s http://localhost:{{DEV_PORT}}/health > /dev/null 2>&1; then
+            echo "✅ Service is ready!"
+            break
+        fi
+        sleep 1
+        if [ $i -eq 30 ]; then
+            echo "❌ Service failed to start within 30 seconds"
+            echo "Check Docker logs: docker logs healthcare-ai-dev"
+            exit 1
+        fi
+    done
 
 # --- Utilities ---
 
