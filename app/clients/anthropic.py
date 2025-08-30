@@ -76,6 +76,11 @@ class AnthropicConfig:
     max_retries: int = 3
     retry_delay: float = 1.0
 
+    # Token limits for validation and truncation
+    max_message_tokens: int = 2000  # Maximum tokens per individual message
+    max_conversation_tokens: int = 200000  # Claude 4 Sonnet default context window
+    token_headroom: int = 2000  # Reserve tokens for response
+
 
 class AnthropicRateLimiter:
     """Professional rate limiter using the limits library."""
@@ -170,15 +175,17 @@ class AnthropicClient:
         Returns:
             Structured Anthropic response
         """
+        truncated_messages = self.truncate_conversation(messages, system_prompt, tools)
+
         # Estimate tokens for rate limiting
-        estimated_tokens = self._estimate_tokens(messages, system_prompt)
+        estimated_tokens = self._estimate_tokens(truncated_messages, system_prompt)
         logger.debug(f"Estimated tokens: {estimated_tokens}")
         await self.rate_limiter.check_rate_limit(estimated_tokens)
 
-        message_dicts = [msg.model_dump() for msg in messages]
+        message_dicts = [msg.model_dump() for msg in truncated_messages]
         tool_dicts = [tool.model_dump() for tool in tools] if tools else None
 
-        logger.debug(f"Creating message with {len(messages)} messages, {len(tools) if tools else 0} tools")
+        logger.debug(f"Creating message with {len(truncated_messages)} messages, {len(tools) if tools else 0} tools")
 
         request_params = {
             "model": kwargs.get("model", self.config.model),
@@ -301,6 +308,94 @@ class AnthropicClient:
         except Exception:
             # Fallback: roughly 4 characters per token
             return len(text_content) // 4
+
+    def estimate_message_tokens(self, message: str) -> int:
+        """Estimate token count for a single message.
+
+        Args:
+            message: Message content
+
+        Returns:
+            Estimated token count
+        """
+        try:
+            return len(self.tokenizer.encode(message)) if self.tokenizer else len(message) // 4
+        except Exception:
+            # Fallback: roughly 4 characters per token
+            return len(message) // 4
+
+    def validate_message_tokens(self, message: str) -> None:
+        """Validate that a message doesn't exceed token limits.
+
+        Args:
+            message: Message content
+
+        Raises:
+            ValueError: If message exceeds token limit
+        """
+        token_count = self.estimate_message_tokens(message)
+        if token_count > self.config.max_message_tokens:
+            raise ValueError(
+                f"Message exceeds token limit: {token_count} tokens > {self.config.max_message_tokens} limit"
+            )
+
+    def truncate_conversation(
+        self, messages: list[AnthropicMessage], system_prompt: str, tools: list[AnthropicTool] | None = None
+    ) -> list[AnthropicMessage]:
+        """Truncate conversation from the beginning to fit within token limits.
+
+        Args:
+            messages: Conversation messages
+            system_prompt: System prompt
+            tools: Available tools
+
+        Returns:
+            Truncated message list that fits within limits
+        """
+        if not messages:
+            return messages
+
+        available_tokens = self.config.max_conversation_tokens - self.config.token_headroom
+
+        system_tokens = self.estimate_message_tokens(system_prompt)
+
+        tool_tokens = 0
+        if tools:
+            tool_content = ""
+            for tool in tools:
+                tool_content += tool.name + tool.description + str(tool.input_schema)
+            tool_tokens = self.estimate_message_tokens(tool_content)
+
+        available_tokens -= system_tokens + tool_tokens
+
+        truncated_messages: list[AnthropicMessage] = []
+        current_tokens = 0
+
+        for message in reversed(messages):
+            message_tokens = 0
+            if isinstance(message.content, str):
+                message_tokens = self.estimate_message_tokens(message.content)
+            elif isinstance(message.content, list):
+                content_text = ""
+                for item in message.content:
+                    if isinstance(item, dict) and "text" in item:
+                        content_text += item["text"]
+                message_tokens = self.estimate_message_tokens(content_text)
+
+            if current_tokens + message_tokens <= available_tokens:
+                truncated_messages.insert(0, message)
+                current_tokens += message_tokens
+            else:
+                # Stop adding messages if we exceed the limit
+                break
+
+        if len(truncated_messages) < len(messages):
+            logger.warning(
+                f"Truncated conversation from {len(messages)} to {len(truncated_messages)} messages "
+                f"to fit within {available_tokens} token limit"
+            )
+
+        return truncated_messages
 
 
 _anthropic_client: AnthropicClient | None = None

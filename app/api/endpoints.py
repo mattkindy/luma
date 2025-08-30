@@ -59,6 +59,10 @@ async def handle_conversation(request: ConversationRequest) -> ConversationRespo
         response_text = await conversation_service.process_message(request.message, session)
         logger.info(f"Generated response for session {session_id}: {response_text[:50]}...")
         return ConversationResponse(response=response_text, session_id=session_id)
+    except ValueError as e:
+        # Handle token validation errors with specific HTTP status
+        logger.warning(f"Message validation error for session {session_id}: {e}")
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Conversation processing error for session {session_id}: {e}", exc_info=True)
         error_msg = "I apologize, but I'm experiencing technical difficulties. Please try again."

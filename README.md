@@ -44,7 +44,7 @@ graph TD
 | Component | Technology | Purpose |
 |-----------|------------|---------|
 | **API Framework** | FastAPI + Uvicorn | High-performance async web framework |
-| **Type System** | Pydantic + SQLModel | Runtime validation and type safety |
+| **Type System** | Pydantic | Runtime validation and type safety |
 | **LLM Integration** | Anthropic SDK | Direct Claude API integration |
 | **Package Management** | uv | Fast Python dependency management |
 | **Code Quality** | Ruff + MyPy | Linting, formatting, and type checking |

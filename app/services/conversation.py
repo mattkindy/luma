@@ -3,6 +3,7 @@
 from datetime import datetime
 from typing import Any
 
+from app.clients.anthropic import get_anthropic_client
 from app.models.llm import LLMMessage
 from app.models.session import Session
 from app.services.llm import LLMService
@@ -23,6 +24,7 @@ class ConversationService:
         """Initialize conversation service with dependencies."""
         self.llm_service = llm_service
         self.tools_registry = tools_registry
+        self.anthropic_client = get_anthropic_client()
 
     async def process_message(self, message: str, session: Session) -> str:
         """Process a user message and return AI response.
@@ -33,8 +35,21 @@ class ConversationService:
 
         Returns:
             AI assistant's response
+
+        Raises:
+            ValueError: If message exceeds token limit
         """
         logger.info(f"Processing message for session {session.session_id}")
+
+        try:
+            self.anthropic_client.validate_message_tokens(message)
+        except ValueError as e:
+            logger.warning(f"Message rejected for session {session.session_id}: {e}")
+            max_message_tokens = self.anthropic_client.config.max_message_tokens
+            raise ValueError(
+                f"Your message is too long. Please keep messages under {max_message_tokens} tokens."
+            ) from e
+
         session.add_message("user", message)
         messages = self._build_conversation_context(session)
 
