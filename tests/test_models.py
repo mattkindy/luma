@@ -331,18 +331,6 @@ class TestSessionModel:
         assert session.failed_verification_attempts == 0
         assert len(session.conversation_history) == 0
 
-    def test_session_add_message(self):
-        """Test adding messages to session."""
-        session = Session(session_id="test_session")
-
-        session.add_message("user", "Hello")
-        assert len(session.conversation_history) == 1
-
-        message = session.conversation_history[0]
-        assert message.role == "user"
-        assert message.content == "Hello"
-        assert message.tool_calls is None
-
     def test_session_set_verified(self):
         """Test setting session as verified."""
         session = Session(session_id="test_session")

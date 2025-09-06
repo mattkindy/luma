@@ -6,22 +6,11 @@ from fastapi import APIRouter, HTTPException
 
 from app import __version__
 from app.models.conversation import ConversationRequest, ConversationResponse, HealthResponse
-from app.services.appointments import InMemoryAppointmentService
-from app.services.conversation import ConversationService
-from app.services.llm import get_llm_service
-from app.services.session_manager import InMemorySessionManager
-from app.services.verification import HardcodedVerificationService
-from app.tools import get_tools_registry
+from app.services.conversation import conversation_service
+from app.services.session_manager import session_manager
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
-
-session_manager = InMemorySessionManager()
-verification_service = HardcodedVerificationService()
-appointment_service = InMemoryAppointmentService()
-tools_registry = get_tools_registry(verification_service, appointment_service)
-llm_service = get_llm_service()
-conversation_service = ConversationService(llm_service, tools_registry)
 
 router = APIRouter()
 

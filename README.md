@@ -208,9 +208,13 @@ luma/
 │   ├── api/
 │   │   ├── __init__.py
 │   │   └── endpoints.py     # API route handlers
-│   ├── clients/
+│   ├── graphs/              # LangGraph components
 │   │   ├── __init__.py
-│   │   └── anthropic.py     # Anthropic API client with rate limiting
+│   │   ├── conversation.py  # Main conversation graph
+│   │   ├── nodes.py         # Graph nodes (agent, tools, verification, error)
+│   │   ├── edges.py         # Edge routing logic
+│   │   ├── state.py         # Graph state schema
+│   │   └── tools.py         # LangGraph tool adapters
 │   ├── models/
 │   │   ├── __init__.py
 │   │   ├── conversation.py  # API request/response models
@@ -220,8 +224,7 @@ luma/
 │   │   └── messages.py      # Message and tool call models
 │   ├── services/
 │   │   ├── __init__.py
-│   │   ├── conversation.py  # Conversation flow orchestration
-│   │   ├── llm.py          # High-level LLM operations
+│   │   ├── conversation.py  # LangGraph-based conversation orchestration
 │   │   ├── session_manager.py # In-memory session management
 │   │   ├── verification.py  # Patient verification service
 │   │   └── appointments.py  # Appointment management service
@@ -249,23 +252,24 @@ luma/
 
 The service provides a complete conversational AI system with:
 
-1. **Claude Integration**: Direct Anthropic API integration with tool calling
-2. **Patient Verification**: Hash-based identity verification with test patients
-3. **Appointment Management**: In-memory appointment listing, confirmation, and cancellation
-4. **Session Management**: CUID-based session identifiers with automatic cleanup
-5. **Tool System**: Modular tool registry with Pydantic validation
-6. **Prompt Caching**: Automatic caching of tool definitions for cost optimization
-7. **Type Safety**: Full type safety with provider-agnostic abstractions
-8. **Comprehensive Logging**: Structured logging with module identification
+1. **LangGraph Orchestration**: Graph-based conversation flow with declarative nodes and edges
+2. **Claude Integration**: LangChain Anthropic integration with tool calling
+3. **Patient Verification**: Hash-based identity verification with test patients
+4. **Appointment Management**: In-memory appointment listing, confirmation, and cancellation
+5. **Session Management**: CUID-based session identifiers with automatic cleanup
+6. **Tool System**: LangGraph-compatible tools with Pydantic validation
+7. **Error Handling**: Robust error recovery with automatic retry logic
+8. **Type Safety**: Full type safety with provider-agnostic abstractions
+9. **Comprehensive Logging**: Structured logging with module identification
 
 ### Service Architecture
 
 ```
-API Endpoints → Conversation Service → LLM Service → Anthropic Client
+API Endpoints → Conversation Service → LangGraph Orchestration
                      ↓                      ↓
-              Tools Registry          Rate Limiting
-                     ↓
-        Verification + Appointment Services
+              Session Manager         Graph Nodes (Agent, Tools, Verification, Error)
+                     ↓                      ↓
+        Verification + Appointment Services → LangGraph Tools
 ```
 
 ### Data Models
@@ -321,7 +325,7 @@ FastAPI automatically generates interactive API documentation:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `ANTHROPIC_API_KEY` | Claude API key | Required for Phase 2+ |
+| `ANTHROPIC_API_KEY` | Claude API key | Required |
 | `PORT` | Server port | 8000 |
 | `LOG_LEVEL` | Logging level | info |
 

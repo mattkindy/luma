@@ -184,3 +184,6 @@ class ProductionAppointmentService:
         # Future implementation would call:
         # return self.scheduling_client.cancel_appointment(patient_id, appointment_id)
         raise NotImplementedError("Production appointment service not implemented yet")
+
+
+appointment_service = InMemoryAppointmentService()

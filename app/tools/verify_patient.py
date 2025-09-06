@@ -2,12 +2,15 @@
 
 import re
 from datetime import datetime
+from typing import Annotated
 
+from langchain_core.tools import tool
+from langgraph.prebuilt import InjectedState
 from pydantic import BaseModel, Field, field_validator
 
-from app.models.session import Session
+from app.graphs.state import ConversationState
+from app.services.session_manager import InMemorySessionManager
 from app.services.verification import PatientVerificationService
-from app.tools.base import ToolDefinition
 
 
 class VerifyPatientInput(BaseModel):
@@ -81,36 +84,14 @@ class VerifyPatientInput(BaseModel):
             raise
 
 
-async def verify_patient_handler(
-    params: BaseModel, session: Session, verification_service: PatientVerificationService
-) -> str:
-    """Handle patient verification tool call."""
-    if session.verified and session.patient_id:
-        return (
-            "You have already been verified. Please use the appointment tools to access your appointment information."
-        )
-
-    verify_input = params if isinstance(params, VerifyPatientInput) else VerifyPatientInput.model_validate(params)
-
-    patient_id = await verification_service.verify_patient(
-        verify_input.name,
-        verify_input.phone,
-        verify_input.date_of_birth,
-    )
-
-    if patient_id:
-        session.set_verified(patient_id)
-        return "Identity verified successfully! You can now access your appointment information."
-
-    session.increment_failed_attempts()
-    return "Unable to verify your identity. Please check your information and try again."
-
-
-def create_verify_patient_tool(verification_service: PatientVerificationService) -> ToolDefinition:
-    """Create verify patient tool with bound verification service."""
-    return ToolDefinition(
-        name="verify_patient",
-        description="""Verify a patient's identity before providing any appointment information.
+def create_verify_patient_tool(
+    verification_service: PatientVerificationService, session_manager: InMemorySessionManager
+):
+    @tool("verify_patient", parse_docstring=True, args_schema=VerifyPatientInput)
+    async def verify_patient_handler(  # noqa: RUF029
+        name: str, phone: str, date_of_birth: str, state: Annotated[ConversationState, InjectedState]
+    ) -> str:
+        """Verify a patient's identity before providing any appointment information.
 
         CRITICAL: This tool MUST be called before any appointment-related actions.
 
@@ -133,7 +114,8 @@ def create_verify_patient_tool(verification_service: PatientVerificationService)
         - Date format must be YYYY-MM-DD
         - Name matching is case-insensitive
         - Only call this tool ONCE per conversation unless verification fails
-        """,
-        input_schema_class=VerifyPatientInput,
-        handler=lambda params, session: verify_patient_handler(params, session, verification_service),
-    )
+        """
+        # This is actually implemented as the `verify` node in the graph.
+        return ""
+
+    return verify_patient_handler

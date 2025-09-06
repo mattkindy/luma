@@ -1,46 +1,25 @@
 """List appointments tool."""
 
+from typing import Annotated
+
+from langchain_core.tools import tool
+from langgraph.prebuilt import InjectedState
 from pydantic import BaseModel
 
-from app.models.session import Session
+from app.graphs.state import ConversationState
 from app.services.appointments import AppointmentService
-from app.tools.base import ToolDefinition
 
 
-class EmptyInput(BaseModel):
+class EmptyInputWithState(BaseModel):
     """Empty input schema for tools that don't require parameters."""
 
-
-async def list_appointments_handler(
-    params: BaseModel, session: Session, appointment_service: AppointmentService
-) -> str:
-    """Handle list appointments tool call."""
-    if not session.verified or not session.patient_id:
-        return "Please verify the patient's identity first before accessing appointment information."
-
-    appointments = await appointment_service.get_appointments(session.patient_id)
-
-    if not appointments:
-        return "The patient has no upcoming appointments scheduled."
-
-    result = "Here are the patient's upcoming appointments:\n\n"
-    for apt in appointments:
-        status_emoji = "✅" if apt.status == "confirmed" else "📅" if apt.status == "scheduled" else "❌"
-        result += f"{status_emoji} **{apt.id}** - {apt.date_time.strftime('%A, %B %d, %Y at %I:%M %p')}\n"
-        result += f"   Provider: {apt.provider}\n"
-        result += f"   Type: {apt.appointment_type}\n"
-        result += f"   Status: {apt.status.title()}\n"
-        result += f"   Location: {apt.location}\n\n"
-
-    result += "The patient can confirm or cancel any scheduled appointment by providing the appointment ID."
-    return result.strip()
+    state: Annotated[ConversationState, InjectedState]
 
 
-def create_list_appointments_tool(appointment_service: AppointmentService) -> ToolDefinition:
-    """Create list appointments tool with bound appointment service."""
-    return ToolDefinition(
-        name="list_appointments",
-        description="""List all upcoming appointments for the verified patient.
+def create_list_appointments_tool(appointment_service: AppointmentService):
+    @tool("list_appointments", parse_docstring=True, args_schema=EmptyInputWithState)
+    async def list_appointments_handler(state: Annotated[ConversationState, InjectedState]) -> str:
+        """List all upcoming appointments for the verified patient.
 
         PREREQUISITE: Patient must be verified first using verify_patient tool.
 
@@ -69,7 +48,25 @@ def create_list_appointments_tool(appointment_service: AppointmentService) -> To
         - Shows appointments in chronological order
         - Includes appointment IDs that can be used with confirm/cancel tools
         - Only shows future appointments, not past ones
-        """,
-        input_schema_class=EmptyInput,
-        handler=lambda params, session: list_appointments_handler(params, session, appointment_service),
-    )
+        """
+        if not state.patient_info.verified or not state.patient_info.patient_id:
+            return "Please verify the patient's identity first before accessing appointment information."
+
+        appointments = await appointment_service.get_appointments(state.patient_info.patient_id)
+
+        if not appointments:
+            return "The patient has no upcoming appointments scheduled."
+
+        result = "Here are the patient's upcoming appointments:\n\n"
+        for apt in appointments:
+            status_emoji = "✅" if apt.status == "confirmed" else "📅" if apt.status == "scheduled" else "❌"
+            result += f"{status_emoji} **{apt.id}** - {apt.date_time.strftime('%A, %B %d, %Y at %I:%M %p')}\n"
+            result += f"   Provider: {apt.provider}\n"
+            result += f"   Type: {apt.appointment_type}\n"
+            result += f"   Status: {apt.status.title()}\n"
+            result += f"   Location: {apt.location}\n\n"
+
+        result += "The patient can confirm or cancel any scheduled appointment by providing the appointment ID."
+        return result.strip()
+
+    return list_appointments_handler

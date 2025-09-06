@@ -18,7 +18,7 @@ class ChatCLI:
         self.base_url = base_url
         self.session_id: str | None = None
         self.console = Console()
-        self.client = httpx.Client(timeout=30.0)
+        self.client = httpx.Client(timeout=60.0)
 
     def start(self) -> None:
         """Start the interactive chat session."""
@@ -91,7 +91,7 @@ class ChatCLI:
             )
 
             # Clear the "thinking" message
-            self.console.print("\r" + " " * 20 + "\r", end="")
+            self.console.print("\r" + " " * 20 + "\r", end="\n")
 
             if response.status_code == 200:
                 data = response.json()

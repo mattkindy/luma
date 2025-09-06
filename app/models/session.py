@@ -2,11 +2,13 @@
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel
 
-from app.models.messages import ConversationMessage
+from app.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -19,25 +21,25 @@ class Session:
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     last_activity: datetime = field(default_factory=lambda: datetime.now(UTC))
     failed_verification_attempts: int = 0
-    conversation_history: list[ConversationMessage] = field(default_factory=list)
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return the session as a dictionary."""
+        return {
+            "session_id": self.session_id,
+            "patient_id": self.patient_id,
+            "verified": self.verified,
+            "created_at": self.created_at.isoformat(),
+            "last_activity": self.last_activity.isoformat(),
+            "failed_verification_attempts": self.failed_verification_attempts,
+        }
 
     def update_activity(self) -> None:
         """Update the last activity timestamp."""
         self.last_activity = datetime.now(UTC)
 
-    def add_message(
-        self,
-        role: Literal["user", "assistant"],
-        content: str,
-        tool_calls: list[dict[str, Any]] | None = None,
-    ) -> None:
-        """Add a message to the conversation history."""
-        message = ConversationMessage(role=role, content=content, timestamp=datetime.now(UTC), tool_calls=tool_calls)
-        self.conversation_history.append(message)
-        self.update_activity()
-
     def set_verified(self, patient_id: str) -> None:
         """Mark session as verified with patient ID."""
+        logger.info(f"Setting session {self.session_id} as verified with patient ID {patient_id}")
         self.verified = True
         self.patient_id = patient_id
         self.update_activity()

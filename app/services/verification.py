@@ -155,3 +155,6 @@ class ProductionVerificationService:
         # Future implementation would call:
         # return await self.ehr_client.patient_match(name=name, phone=phone, dob=date_of_birth)
         raise NotImplementedError("Production verification not implemented yet")
+
+
+verification_service = HardcodedVerificationService()

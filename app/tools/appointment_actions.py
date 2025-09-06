@@ -1,10 +1,13 @@
 """Appointment confirmation and cancellation tools."""
 
+from typing import Annotated
+
+from langchain_core.tools import tool
+from langgraph.prebuilt import InjectedState
 from pydantic import BaseModel, Field
 
-from app.models.session import Session
+from app.graphs.state import ConversationState
 from app.services.appointments import AppointmentService
-from app.tools.base import ToolDefinition
 
 
 class AppointmentActionInput(BaseModel):
@@ -19,53 +22,15 @@ class AppointmentActionInput(BaseModel):
         examples=["APT_001", "APT_002"],
     )
 
-
-async def confirm_appointment_handler(
-    params: BaseModel, session: Session, appointment_service: AppointmentService
-) -> str:
-    """Handle confirm appointment tool call."""
-    if not session.verified or not session.patient_id:
-        return "Please verify the patient's identity first before accessing appointment information."
-
-    action_input = (
-        params if isinstance(params, AppointmentActionInput) else AppointmentActionInput.model_validate(params)
-    )
-
-    success = await appointment_service.confirm_appointment(session.patient_id, action_input.appointment_id)
-
-    if success:
-        return f"Appointment {action_input.appointment_id} has been confirmed successfully!"
-
-    return (
-        f"Unable to confirm appointment {action_input.appointment_id}. "
-        "It may not exist, already be confirmed, or be cancelled."
-    )
+    state: Annotated[ConversationState, InjectedState]
 
 
-async def cancel_appointment_handler(
-    params: BaseModel, session: Session, appointment_service: AppointmentService
-) -> str:
-    """Handle cancel appointment tool call."""
-    if not session.verified or not session.patient_id:
-        return "Please verify the patient's identity first before accessing appointment information."
-
-    action_input = (
-        params if isinstance(params, AppointmentActionInput) else AppointmentActionInput.model_validate(params)
-    )
-
-    success = await appointment_service.cancel_appointment(session.patient_id, action_input.appointment_id)
-
-    if success:
-        return f"Appointment {action_input.appointment_id} has been cancelled successfully."
-    else:
-        return f"Unable to cancel appointment {action_input.appointment_id}. It may not exist or already be cancelled."
-
-
-def create_confirm_appointment_tool(appointment_service: AppointmentService) -> ToolDefinition:
-    """Create confirm appointment tool with bound appointment service."""
-    return ToolDefinition(
-        name="confirm_appointment",
-        description="""Confirm a scheduled appointment for the verified patient.
+def create_confirm_appointment_tool(appointment_service: AppointmentService):
+    @tool("confirm_appointment", parse_docstring=True, args_schema=AppointmentActionInput)
+    async def confirm_appointment_handler(
+        appointment_id: str, state: Annotated[ConversationState, InjectedState]
+    ) -> str:
+        """Confirm a scheduled appointment for the verified patient.
 
         PREREQUISITE: Patient must be verified first using verify_patient tool.
 
@@ -99,17 +64,31 @@ def create_confirm_appointment_tool(appointment_service: AppointmentService) -> 
         - "APT_001 not found" - Invalid appointment ID
         - "Already confirmed" - Appointment was previously confirmed
         - "Cannot confirm cancelled appointment" - Appointment was cancelled
-        """,
-        input_schema_class=AppointmentActionInput,
-        handler=lambda params, session: confirm_appointment_handler(params, session, appointment_service),
-    )
+        """
+        if not state.patient_info.verified or not state.patient_info.patient_id:
+            return "Please verify the patient's identity first before accessing appointment information."
+
+        success = await appointment_service.confirm_appointment(
+            state.patient_info.patient_id,
+            appointment_id,
+        )
+
+        if success:
+            return f"Appointment {appointment_id} has been confirmed successfully!"
+
+        return (
+            f"Unable to confirm appointment {appointment_id}. It may not exist, already be confirmed, or be cancelled."
+        )
+
+    return confirm_appointment_handler
 
 
-def create_cancel_appointment_tool(appointment_service: AppointmentService) -> ToolDefinition:
-    """Create cancel appointment tool with bound appointment service."""
-    return ToolDefinition(
-        name="cancel_appointment",
-        description="""Cancel a scheduled or confirmed appointment for the verified patient.
+def create_cancel_appointment_tool(appointment_service: AppointmentService):
+    @tool("cancel_appointment", parse_docstring=True, args_schema=AppointmentActionInput)
+    async def cancel_appointment_handler(
+        appointment_id: str, state: Annotated[ConversationState, InjectedState]
+    ) -> str:
+        """Cancel a scheduled or confirmed appointment for the verified patient.
 
         PREREQUISITE: Patient must be verified first using verify_patient tool.
 
@@ -145,7 +124,15 @@ def create_cancel_appointment_tool(appointment_service: AppointmentService) -> T
         - "APT_001 not found" - Invalid appointment ID
         - "Already cancelled" - Appointment was previously cancelled
         - "Cannot cancel past appointment" - Appointment date has passed
-        """,
-        input_schema_class=AppointmentActionInput,
-        handler=lambda params, session: cancel_appointment_handler(params, session, appointment_service),
-    )
+        """
+        if not state.patient_info.verified or not state.patient_info.patient_id:
+            return "Please verify the patient's identity first before accessing appointment information."
+
+        success = await appointment_service.cancel_appointment(state.patient_info.patient_id, appointment_id)
+
+        if success:
+            return f"Appointment {appointment_id} has been cancelled successfully."
+
+        return f"Unable to cancel appointment {appointment_id}. It may not exist or already be cancelled."
+
+    return cancel_appointment_handler

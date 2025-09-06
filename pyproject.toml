@@ -17,6 +17,10 @@ dependencies = [
     "cuid2>=2.0.0",
     "limits>=3.6.0",
     "rich>=13.0.0",
+    "langgraph>=0.6.6",
+    "langchain>=0.3.27",
+    "langchain-core>=0.3.75",
+    "langchain-anthropic>=0.3.19",
 ]
 
 [project.optional-dependencies]
@@ -95,6 +99,11 @@ enable_error_code = ["possibly-undefined"]
 [[tool.mypy.overrides]]
 module = [
     "uvicorn.*",
+    "langgraph.*",
+    "langchain.*",
+    "langchain_core.*",
+    "langchain_anthropic.*",
+    "langchain_community.*",
 ]
 ignore_missing_imports = true
 

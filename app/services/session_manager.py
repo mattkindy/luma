@@ -97,3 +97,6 @@ class InMemorySessionManager:
         """Get current number of verified sessions."""
         self._cleanup_expired_sessions()
         return sum(1 for session in self.sessions.values() if session.verified)
+
+
+session_manager = InMemorySessionManager()

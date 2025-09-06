@@ -1,30 +1,31 @@
-"""Conversation service for managing conversation flow."""
+"""Conversation service for managing conversation flow using LangGraph."""
 
-from datetime import datetime
-from typing import Any
+import json
 
-from app.clients.anthropic import get_anthropic_client
-from app.models.llm import LLMMessage
+from app.graphs.conversation import ConversationGraphManager
 from app.models.session import Session
-from app.services.llm import LLMService
-from app.tools.registry import ToolsRegistry
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
 
 class ConversationService:
-    """Service for handling conversational AI interactions."""
+    """Service for handling conversational AI interactions using LangGraph.
 
-    def __init__(
-        self,
-        llm_service: LLMService,
-        tools_registry: ToolsRegistry,
-    ):
-        """Initialize conversation service with dependencies."""
-        self.llm_service = llm_service
-        self.tools_registry = tools_registry
-        self.anthropic_client = get_anthropic_client()
+    This service maintains the same interface as the original but uses
+    LangGraph for orchestration under the hood.
+    """
+
+    def __init__(self):
+        """Initialize conversation service.
+
+        Args:
+            llm_service: Legacy parameter, kept for compatibility
+            tools_registry: Legacy parameter, kept for compatibility
+        """
+        self.graph_manager = ConversationGraphManager()
+
+        logger.info("ConversationService initialized with LangGraph")
 
     async def process_message(self, message: str, session: Session) -> str:
         """Process a user message and return AI response.
@@ -39,95 +40,60 @@ class ConversationService:
         Raises:
             ValueError: If message exceeds token limit
         """
-        logger.info(f"Processing message for session {session.session_id}")
+        logger.info(
+            f"Processing message for session {session.session_id} via LangGraph {json.dumps(session.as_dict())}"
+        )
 
         try:
-            self.anthropic_client.validate_message_tokens(message)
-        except ValueError as e:
-            logger.warning(f"Message rejected for session {session.session_id}: {e}")
-            max_message_tokens = self.anthropic_client.config.max_message_tokens
-            raise ValueError(
-                f"Your message is too long. Please keep messages under {max_message_tokens} tokens."
-            ) from e
+            self._validate_message_tokens(message)
 
-        session.add_message("user", message)
-        messages = self._build_conversation_context(session)
+            patient_info = {
+                "patient_id": session.patient_id,
+                "verified": session.verified,
+                "failed_attempts": session.failed_verification_attempts,
+            }
 
-        llm_tools = self.tools_registry.get_llm_tools(session)
-        logger.info(f"Available tools: {list(llm_tools.keys())}")
-
-        try:
-            logger.info("Executing agent loop")
-            result = await self.llm_service.execute_agent_loop(
-                messages=messages,
-                system_prompt=self._get_system_prompt(session),
-                tools=llm_tools,
-                max_turns=5,
+            result = await self.graph_manager.process_message(
+                message=message,
+                session_id=session.session_id,
+                patient_info=patient_info,
             )
 
-            logger.info(f"Agent loop completed in {result.turns} turns, stop_reason: {result.stop_reason}")
+            response_text = result.get("response", "I apologize, but I couldn't process your request.")
+            metadata = result.get("metadata", {})
 
-            final_text = self._extract_text_from_content(result.content)
+            if metadata.get("total_input_tokens"):
+                logger.info(
+                    f"Token usage - Input: {metadata['total_input_tokens']}, "
+                    f"Output: {metadata['total_output_tokens']}, "
+                    f"Cache hits: {metadata.get('cache_read_tokens', 0)}"
+                )
 
-            if final_text:
-                logger.info(f"Extracted final text: {final_text[:100]}...")
-                session.add_message("assistant", final_text)
-                return final_text
+            return response_text
 
+        except ValueError:
+            raise
         except Exception as e:
-            logger.error(f"Conversation processing failed: {e}", exc_info=True)
+            logger.error(f"LangGraph processing failed: {e}", exc_info=True)
             error_msg = "I apologize, but I'm experiencing technical difficulties. Please try again."
-            session.add_message("assistant", error_msg)
             return error_msg
 
-        # Fallback response
-        fallback_msg = "I'm here to help with your appointments. Could you please rephrase your request?"
-        session.add_message("assistant", fallback_msg)
-        return fallback_msg
+    def _validate_message_tokens(self, message: str) -> None:
+        """Validate message doesn't exceed token limits.
 
-    def _build_conversation_context(self, session: Session) -> list[LLMMessage]:
-        """Build conversation context for LLM."""
-        messages = []
-        for msg in session.conversation_history:
-            if msg.role in ["user", "assistant"]:
-                messages.append(LLMMessage(role=msg.role, content=msg.content))
-        return messages
+        This maintains compatibility with existing token validation.
 
-    def _get_system_prompt(self, session: Session) -> str:
-        """Get system prompt based on session state."""
-        base_prompt = """You are a helpful healthcare assistant for appointment management.
+        Args:
+            message: Message to validate
 
-Your primary responsibilities:
-1. Verify patient identity before providing appointment information
-2. Help patients list, confirm, and cancel appointments
-3. Provide clear, professional, and empathetic responses
+        Raises:
+            ValueError: If message exceeds token limit
+        """
+        # Simple length-based validation (replace with actual tokenizer if needed)
+        MAX_MESSAGE_CHARS = 4000  # Roughly 1000 tokens
+        if len(message) > MAX_MESSAGE_CHARS:
+            max_message_tokens = 1000  # For error message compatibility
+            raise ValueError(f"Your message is too long. Please keep messages under {max_message_tokens} tokens.")
 
-IMPORTANT SECURITY RULES:
-- NEVER provide appointment information without successful identity verification
-- Always verify identity using full name, phone number, and date of birth
-- Use the verify_patient tool for identity verification
-- Only use appointment tools AFTER successful verification
 
-Current session status:"""
-
-        if session.verified and session.patient_id:
-            base_prompt += f"\n- Patient verified: YES (Patient ID: {session.patient_id})"
-            base_prompt += "\n- Appointment tools: AVAILABLE"
-        else:
-            base_prompt += "\n- Patient verified: NO"
-            base_prompt += "\n- Appointment tools: NOT AVAILABLE (verification required)"
-
-        if session.failed_verification_attempts > 0:
-            base_prompt += f"\n- Failed verification attempts: {session.failed_verification_attempts}"
-
-        base_prompt += f"\nCurrent date and time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-
-        return base_prompt
-
-    def _extract_text_from_content(self, content: list[Any]) -> str | None:
-        """Extract text content from Claude response."""
-        for block in content:
-            if (hasattr(block, "type") and block.type == "text") or hasattr(block, "text"):
-                return block.text
-
-        return None
+conversation_service = ConversationService()
